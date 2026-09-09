@@ -1,0 +1,34 @@
+services:
+  lighttpd:
+    image: ghcr.io/sneak-it/lighttpd-docker:latest
+    container_name: lighttpd
+    restart: unless-stopped
+    user: "1000:1000"
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      SERVER_ROOT: "/var/www/html"
+      SERVER_NAME: "example.com"
+      ACCESS_LOG: "/dev/stderr"
+    volumes:
+      - ./site:/var/www/html:ro
+      - ./lighttpd.conf:/etc/lighttpd/lighttpd.conf:ro
+      - ./conf.d:/etc/lighttpd/conf.d:ro
+      - ./tls:/etc/lighttpd/tls:ro
+      - compress:/var/cache/lighttpd/compress
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  compress:
