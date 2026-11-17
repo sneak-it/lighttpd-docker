@@ -36,7 +36,10 @@ note "## \`$IMAGE\`"
 echo "hello" > "$DOC/index.html"
 echo "junk"  > "$DOC/x.php"
 printf 'body{color:red}\n%.0s' $(seq 400) > "$DOC/big.css"
-chmod 644 "$DOC"/*
+mkdir -m 755 "$DOC/.git" "$DOC/.well-known"
+echo "junk"  > "$DOC/.git/config"
+echo "acme"  > "$DOC/.well-known/x"
+chmod 644 "$DOC"/* "$DOC/.git/config" "$DOC/.well-known/x"
 
 # 1. The binary runs. Catches a broken build or a missing shared library.
 if V=$(docker run --rm "$IMAGE" /usr/local/sbin/lighttpd -V 2>&1); then
@@ -65,13 +68,17 @@ docker run --rm "$IMAGE" /usr/local/sbin/lighttpd -tt -f /etc/lighttpd/lighttpd.
   && ok "config startup test" || fail "config startup test" "lighttpd -tt failed"
 
 # 4. It actually serves. This is the failure a successful build cannot catch.
-docker run -d --name "$NAME" -p "$PORT:8080" -v "$DOC:/var/www/html:ro" "$IMAGE" >/dev/null
+docker run -d --name "$NAME" -p "$PORT:8080" -p "$((PORT + 2)):8081" \
+  -v "$DOC:/var/www/html:ro" "$IMAGE" >/dev/null
 wait_http "http://localhost:$PORT/index.html" \
   && ok "serves a request" || fail "serves a request" "no 200 within 20s"
 
 code() { curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT$1"; }
 check "index.html 200" "$(code /index.html)" "200"
 check ".php denied"    "$(code /x.php)"      "403"
+check "/ serves index"     "$(code /)"              "200"
+check "dotfile denied"     "$(code /.git/config)"   "403"
+check ".well-known served" "$(code /.well-known/x)" "200"
 
 # Without the mime map, CSS goes out as application/octet-stream.
 check "mime map applied" \
@@ -86,13 +93,28 @@ check "container running" "$(docker inspect -f '{{.State.Running}}' "$NAME")" "t
 check "runs as uid 1000" "$(docker exec "$NAME" id -u 2>/dev/null)" "1000"
 
 # Healthcheck must pass against a document root with no index, not just a populated one.
-i=0
-while [ "$i" -lt 20 ]; do
-  h=$(docker inspect -f '{{.State.Health.Status}}' "$NAME" 2>/dev/null || echo none)
-  [ "$h" = healthy ] && break
-  i=$((i + 1)); sleep 1
-done
-check "healthcheck healthy" "${h:-none}" "healthy"
+wait_healthy() {
+  i=0
+  while [ "$i" -lt 25 ]; do
+    h=$(docker inspect -f '{{.State.Health.Status}}' "$1" 2>/dev/null || echo none)
+    [ "$h" = healthy ] && return 0
+    [ "$h" = unhealthy ] && return 1
+    i=$((i + 1)); sleep 1
+  done
+  return 1
+}
+wait_healthy "$NAME" && ok "healthcheck healthy" || fail "healthcheck healthy" "got ${h:-none}"
+
+# The health listener is bound to loopback in the container, so publishing its port
+# must not make it answer. Otherwise the endpoint is public, not internal.
+check "health port not published" \
+  "$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://localhost:$((PORT + 2))/healthz")" "000"
+
+# A probe every 30s would otherwise bury the access log.
+docker exec "$NAME" wget -qT2 -O- "http://127.0.0.1:8081/healthz" >/dev/null 2>&1
+docker logs "$NAME" 2>&1 | grep -q healthz \
+  && fail "healthz stays out of access log" "probe was logged" \
+  || ok "healthz stays out of access log"
 
 # 5. Compression actually works, which is the point of the zlib/brotli/zstd flags.
 cat > "$CFG/deflate.conf" <<'CONF'
@@ -150,6 +172,69 @@ docker rm -f "$NAME" >/dev/null 2>&1
 docker run -d --name "$NAME" -e PORT=9000 -p "$PORT:9000" -v "$DOC:/var/www/html:ro" "$IMAGE" >/dev/null
 wait_http "http://localhost:$PORT/index.html" \
   && ok "PORT override" || fail "PORT override" "PORT=9000 did not take effect"
+
+# 9. TLS on the public port must not break the healthcheck. A probe that spoke plain
+# HTTP to that port would report unhealthy forever on any TLS deployment.
+openssl req -x509 -newkey rsa:2048 -keyout "$CFG/k.pem" -out "$CFG/c.pem" \
+  -days 2 -nodes -subj /CN=localhost >/dev/null 2>&1
+cat "$CFG/k.pem" "$CFG/c.pem" > "$CFG/tls.pem"
+chmod 644 "$CFG/tls.pem"
+cat > "$CFG/tls.conf" <<'CONF'
+server.document-root = env.SERVER_ROOT
+server.port          = env.PORT
+server.modules       = ( "mod_openssl" )
+$SERVER["socket"] == "127.0.0.1:" + env.HEALTH_PORT {
+  server.document-root = "/usr/local/share/lighttpd/health"
+}
+$SERVER["socket"] == ":" + env.PORT {
+  ssl.engine  = "enable"
+  ssl.pemfile = "/etc/lighttpd/tls/tls.pem"
+}
+CONF
+chmod 644 "$CFG/tls.conf"
+docker rm -f "$NAME" >/dev/null 2>&1
+docker run -d --name "$NAME" -p "$PORT:8080" -v "$DOC:/var/www/html:ro" \
+  -v "$CFG/tls.conf:/etc/lighttpd/lighttpd.conf:ro" \
+  -v "$CFG/tls.pem:/etc/lighttpd/tls/tls.pem:ro" "$IMAGE" >/dev/null
+wait_healthy "$NAME" && ok "healthy behind TLS" || fail "healthy behind TLS" "got ${h:-none}"
+
+# 10. A config that drops the health listener must still report healthy, so replacing
+# the bundled config does not silently strand the container in unhealthy.
+cat > "$CFG/bare.conf" <<'CONF'
+server.document-root = env.SERVER_ROOT
+server.port          = env.PORT
+CONF
+chmod 644 "$CFG/bare.conf"
+docker rm -f "$NAME" >/dev/null 2>&1
+docker run -d --name "$NAME" -p "$PORT:8080" -v "$DOC:/var/www/html:ro" \
+  -v "$CFG/bare.conf:/etc/lighttpd/lighttpd.conf:ro" "$IMAGE" >/dev/null
+wait_healthy "$NAME" && ok "healthy without health listener" \
+  || fail "healthy without health listener" "got ${h:-none}"
+
+# 11. A health listener that answers wrongly must fail the probe, not fall back to the
+# bare connect. Here it serves the site root, which has no /healthz.
+cat > "$CFG/broken.conf" <<'CONF'
+server.document-root = env.SERVER_ROOT
+server.port          = env.PORT
+$SERVER["socket"] == "127.0.0.1:" + env.HEALTH_PORT { }
+CONF
+chmod 644 "$CFG/broken.conf"
+docker rm -f "$NAME" >/dev/null 2>&1
+docker run -d --name "$NAME" -p "$PORT:8080" -v "$DOC:/var/www/html:ro" \
+  -v "$CFG/broken.conf:/etc/lighttpd/lighttpd.conf:ro" "$IMAGE" >/dev/null
+if wait_http "http://localhost:$PORT/index.html"; then
+  docker exec "$NAME" sh -c "$(docker inspect -f '{{index .Config.Healthcheck.Test 1}}' "$NAME")" >/dev/null 2>&1 \
+    && fail "broken health listener fails probe" "probe passed" \
+    || ok "broken health listener fails probe"
+else
+  fail "broken health listener" "container did not serve"
+fi
+
+# 12. The cache directory must be writable by uid 1000 on a fresh named volume.
+docker run --rm -v "$NAME-v:/var/cache/lighttpd/compress" "$IMAGE" \
+  touch /var/cache/lighttpd/compress/x 2>/dev/null \
+  && ok "cache volume writable" || fail "cache volume writable" "uid 1000 cannot write"
+docker volume rm -f "$NAME-v" >/dev/null 2>&1
 
 [ "$FAILED" -eq 0 ] && echo "PASS" || { echo "FAILED"; docker logs "$NAME" 2>&1 | tail -20; }
 exit "$FAILED"

@@ -30,16 +30,26 @@ RUN cd "lighttpd-$LIGHTTPD_VERSION" \
  && cp doc/config/conf.d/mime.conf /out/mime.conf
 
 FROM alpine:3
-RUN apk add --no-cache pcre2 zlib brotli-libs zstd-libs libdeflate libmaxminddb \
+# apk add leaves installed packages alone, so base-image packages need the upgrade.
+RUN apk upgrade --no-cache \
+ && apk add --no-cache pcre2 zlib brotli-libs zstd-libs libdeflate libmaxminddb \
       libssl3 libcrypto3 lua5.5-libs \
- && mkdir -p /var/www/html /etc/lighttpd/conf.d
+ && mkdir -p /var/www/html /etc/lighttpd/conf.d /var/cache/lighttpd/compress \
+ && chown 1000:1000 /var/cache/lighttpd/compress
 COPY --from=build /out/usr/local /usr/local
 COPY --from=build /out/mime.conf /etc/lighttpd/mime.conf
 COPY lighttpd.conf /etc/lighttpd/lighttpd.conf
-RUN /usr/local/sbin/lighttpd -V
-ENV PORT=8080 SERVER_ROOT=/var/www/html SERVER_NAME=localhost ACCESS_LOG=/dev/stderr
+RUN mkdir -p /usr/local/share/lighttpd/health \
+ && echo ok > /usr/local/share/lighttpd/health/healthz \
+ && /usr/local/sbin/lighttpd -V
+ENV PORT=8080 SERVER_ROOT=/var/www/html SERVER_NAME=localhost ACCESS_LOG=/dev/stderr \
+    HEALTH_PORT=8081
 USER 1000:1000
 EXPOSE 8080
+# The internal listener proves lighttpd reads a file off disk and returns it. The bare
+# connect applies only when a mounted config drops the listener, never when it fails.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s \
-  CMD wget -qS -O /dev/null "http://127.0.0.1:$PORT/" 2>&1 | grep -q '^  HTTP/'
+  CMD if nc -w2 -z 127.0.0.1 "$HEALTH_PORT"; then \
+        wget -qT2 -O- "http://127.0.0.1:$HEALTH_PORT/healthz" | grep -qx ok; \
+      else nc -w2 -z 127.0.0.1 "$PORT"; fi
 CMD ["/usr/local/sbin/lighttpd", "-D", "-f", "/etc/lighttpd/lighttpd.conf"]

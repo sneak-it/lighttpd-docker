@@ -11,6 +11,7 @@ services:
       SERVER_ROOT: "/var/www/html"
       SERVER_NAME: "example.com"
       ACCESS_LOG: "/dev/stderr"
+      HEALTH_PORT: "8081"
     volumes:
       - ./site:/var/www/html:ro
       - ./lighttpd.conf:/etc/lighttpd/lighttpd.conf:ro

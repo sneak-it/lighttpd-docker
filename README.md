@@ -25,10 +25,16 @@ them. Use `server.modules += ( ... )` so you do not have to repeat the whole mod
 empty or missing directory is fine.
 
 **To start from scratch,** mount your own file over `/etc/lighttpd/lighttpd.conf`. Keep these
-two lines, or you lose mime types and access logs:
+four blocks, or you lose `/` serving `index.html`, mime types, access logs, and the healthcheck:
 
+    index-file.names = ( "index.html" )
     include "/etc/lighttpd/mime.conf"
     accesslog.filename = env.ACCESS_LOG
+
+    $SERVER["socket"] == "127.0.0.1:" + env.HEALTH_PORT {
+      server.document-root = "/usr/local/share/lighttpd/health"
+      accesslog.filename   = "/dev/null"
+    }
 
 Check any config before you restart, because a bad one leaves the server down. No output means
 it is fine:
@@ -43,8 +49,9 @@ it is fine:
 | `SERVER_ROOT` | No | `/var/www/html` | Document root |
 | `SERVER_NAME` | No | `localhost` | `server.name` |
 | `ACCESS_LOG` | No | `/dev/stderr` | Access log path. Set `/dev/null` to silence |
+| `HEALTH_PORT` | No | `8081` | Loopback-only port for the healthcheck. Must differ from `PORT` |
 
-The bundled config reads all four, so do not remove one. Unsetting any gives
+The bundled config reads all five, so do not remove one. Unsetting any gives
 `Undefined env variable`, and an empty `PORT` or `SERVER_ROOT` also fails to start. This only
 applies while you use the bundled config; your own config can ignore them.
 
@@ -84,12 +91,21 @@ need it.
   outright, so a config from an older lighttpd loses those settings without saying so.
 - **`url.access-deny` is a suffix match, not a path match.** `/.ht` does not block
   `.htaccess`, because the URL does not end in `/.ht`. Use the full suffix.
+- **Dotfiles are denied.** Any path with a segment that starts with a dot returns 403, so a
+  stray `.git` is not served. `/.well-known/` is the exception, for ACME.
 - **Runs as uid 1000.** Mounted files must be readable by it and directories traversable; a
   0700 directory produces a confusing 403.
 - **`mod_deflate` needs a writable `deflate.cache`** to compress each object once, which means
   a writable volume on an otherwise read-only container. Weigh it against pre-compressing.
-- **The healthcheck accepts any HTTP status**, so an empty document root still reports healthy.
-  It checks that lighttpd answers, not that your content exists.
+- **The healthcheck probes its own endpoint, not your site.** It fetches `/healthz` from a
+  loopback-only listener on `HEALTH_PORT`, serving a file the image ships. That proves lighttpd
+  reads a file off disk and returns it, without depending on your document root or on `PORT`
+  being plain HTTP. An empty document root still reports healthy.
+- **A config that drops the health listener falls back to a bare TCP connect** on `PORT`, which
+  only proves the socket accepts. Keep the `$SERVER["socket"]` block to keep the real check. A
+  listener that is present but fails does not fall back; it reports unhealthy.
+- **`HEALTH_PORT` must not collide with `PORT`.** Both bind, so a clash fails at startup with
+  `can't bind to socket`.
 
 ## Build
 
@@ -122,6 +138,9 @@ Dependabot keeps the actions current.
 The base is the floating `alpine:3`, so branch bumps arrive on their own and no pin goes EOL.
 A branch jump can rename a build dependency; the build then fails loudly and the dated tags
 stay pullable.
+
+Every release build skips the layer cache and runs `apk upgrade`, so Alpine package fixes land
+within a week even when the `alpine:3` image itself has not moved.
 
 Rebuilds produce a new digest even with no upstream change, so digest-watching updaters
 (Watchtower, Dockhand) redeploy on every rebuild.
