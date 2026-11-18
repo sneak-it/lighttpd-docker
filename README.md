@@ -135,9 +135,12 @@ boolean, the rest are features (`enabled`/`disabled`/`auto`).
 
 ## Updates
 
-The weekly workflow resolves the newest upstream tarball and pushes. Upstream has no release
-feed, so the schedule is the release trigger; use **Run workflow** to pull a fix in sooner.
-Dependabot keeps the actions current.
+The weekly workflow resolves the newest upstream tarball and pushes. That includes a new
+release series such as 1.5.x, which moves `latest` and `1`; pin `1.4` to stay on 1.4. Upstream
+has no release feed, so the schedule is the release trigger; use **Run workflow** to pull a fix
+in sooner.
+A run for a version older than the newest upstream one publishes only that version's own tags,
+so `latest`, `1` and `1.4` never move backwards. Dependabot keeps the actions current.
 
 The base is the floating `alpine:3`, so branch bumps arrive on their own and no pin goes EOL.
 A branch jump can rename a build dependency; the build then fails loudly and the dated tags

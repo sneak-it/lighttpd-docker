@@ -3,15 +3,16 @@ ARG LIGHTTPD_VERSION
 
 FROM alpine:3 AS build
 ARG LIGHTTPD_VERSION
-ARG SRC=https://download.lighttpd.net/lighttpd/releases-1.4.x
+ARG SRC=https://download.lighttpd.net/lighttpd
 # Releases ship no checksum file, so the signature is the only integrity check.
 ARG SIGNING_FPR=649D0DD767FF206202A76C5158F14A786FE198C8
 RUN apk add --no-cache build-base meson ninja-build pkgconf ca-certificates curl gnupg xz tar \
       pcre2-dev zlib-dev brotli-dev zstd-dev libdeflate-dev libmaxminddb-dev openssl-dev lua5.5-dev
 COPY lighttpd-signing-key.asc /tmp/
 WORKDIR /tmp/src
-RUN curl -fsSLO "$SRC/lighttpd-$LIGHTTPD_VERSION.tar.xz" \
- && curl -fsSLO "$SRC/lighttpd-$LIGHTTPD_VERSION.tar.xz.asc" \
+RUN url="$SRC/releases-${LIGHTTPD_VERSION%.*}.x/lighttpd-$LIGHTTPD_VERSION.tar.xz" \
+ && curl -fsSLO "$url" \
+ && curl -fsSLO "$url.asc" \
  && export GNUPGHOME=$(mktemp -d) \
  && gpg --batch --import /tmp/lighttpd-signing-key.asc \
  && gpg --batch --list-keys --with-colons "$SIGNING_FPR" > /tmp/key.txt \

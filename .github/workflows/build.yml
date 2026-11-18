@@ -32,19 +32,10 @@ jobs:
         name: Resolve version and tags
         env:
           INPUT_VERSION: ${{ inputs.version }}
-        run: |
-          set -eu
-          v=$INPUT_VERSION
-          [ -n "$v" ] || v=$(curl -fsSL https://download.lighttpd.net/lighttpd/releases-1.4.x/ \
-            | grep -o 'lighttpd-[0-9.]*\.tar\.xz' | sed 's/lighttpd-//;s/\.tar\.xz//' \
-            | sort -uV | tail -1)
-          case "$v" in *[!0-9.]*) v= ;; esac
-          case "$v" in [0-9]*.[0-9]*.[0-9]*) ;; *) echo "bad version: '$v'"; exit 1 ;; esac
-          img=ghcr.io/${GITHUB_REPOSITORY,,}
-          echo "version=$v" >> "$GITHUB_OUTPUT"
-          # The dated tag never moves, so a rollback target survives every rebuild.
-          echo "tags=$img:latest,$img:${v%%.*},$img:${v%.*},$img:$v,$img:$v-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
-          echo "### lighttpd $v" >> "$GITHUB_STEP_SUMMARY"
+        run: .github/resolve-version.sh >> "$GITHUB_OUTPUT"
+
+      - name: Test tag rules
+        run: tests/tags.sh
 
       - uses: docker/setup-buildx-action@v4
 
