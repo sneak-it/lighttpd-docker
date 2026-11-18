@@ -2,7 +2,8 @@
 
 The goal of this container is to have automated releases that stay up to date with Alpine and lighttpd. Since there is no official lighttpd Docker image, this was created to fill that gap.
 
-Tags: `latest`, `1`, `1.4`, `1.4.85`, and a dated `1.4.85-YYYYMMDD` that never moves.
+Tags: `latest`, `1`, `1.4`, `1.4.85`, and a dated `1.4.85-YYYYMMDD` that never moves. Platforms:
+`linux/amd64` and `linux/arm64`.
 
 ## Running it
 
