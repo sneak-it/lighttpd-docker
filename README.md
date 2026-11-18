@@ -15,6 +15,10 @@ For a quick look without a config of your own:
 
     docker run -p 8080:8080 -v ./site:/var/www/html:ro ghcr.io/sneak-it/lighttpd-docker
 
+Stopping is graceful. The image stops on SIGINT, lighttpd's graceful shutdown, so requests in
+flight finish before it exits. The wait lasts about 9 seconds, inside Docker's default 10 second
+stop timeout, and a response still running after that is cut off.
+
 ## Configuration
 
 The image ships a working [`lighttpd.conf`](lighttpd.conf). To serve static files you do not

@@ -46,6 +46,8 @@ ENV PORT=8080 SERVER_ROOT=/var/www/html SERVER_NAME=localhost ACCESS_LOG=/dev/st
     HEALTH_PORT=8081
 USER 1000:1000
 EXPOSE 8080
+# SIGINT is lighttpd's graceful shutdown; SIGTERM exits at once and cuts off responses.
+STOPSIGNAL SIGINT
 # The internal listener proves lighttpd reads a file off disk and returns it. The bare
 # connect applies only when a mounted config drops the listener, never when it fails.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s \

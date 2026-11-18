@@ -39,6 +39,7 @@ printf 'body{color:red}\n%.0s' $(seq 400) > "$DOC/big.css"
 mkdir -m 755 "$DOC/.git" "$DOC/.well-known"
 echo "junk"  > "$DOC/.git/config"
 echo "acme"  > "$DOC/.well-known/x"
+head -c 67108864 /dev/zero > "$DOC/big.bin"
 chmod 644 "$DOC"/* "$DOC/.git/config" "$DOC/.well-known/x"
 
 # 1. The binary runs. Catches a broken build or a missing shared library.
@@ -235,6 +236,20 @@ docker run --rm -v "$NAME-v:/var/cache/lighttpd/compress" "$IMAGE" \
   touch /var/cache/lighttpd/compress/x 2>/dev/null \
   && ok "cache volume writable" || fail "cache volume writable" "uid 1000 cannot write"
 docker volume rm -f "$NAME-v" >/dev/null 2>&1
+
+# 13. A stop must let a download in flight finish. SIGTERM would cut it off.
+docker rm -f "$NAME" >/dev/null 2>&1
+docker run -d --name "$NAME" -p "$PORT:8080" -v "$DOC:/var/www/html:ro" "$IMAGE" >/dev/null
+if wait_http "http://localhost:$PORT/index.html"; then
+  curl -s --limit-rate 16M -o /dev/null -w '%{size_download}' \
+    "http://localhost:$PORT/big.bin" > "$CFG/dl" &
+  sleep 1
+  docker stop "$NAME" >/dev/null
+  wait
+  check "stop finishes download in flight" "$(cat "$CFG/dl")" "67108864"
+else
+  fail "graceful stop" "container did not serve"
+fi
 
 [ "$FAILED" -eq 0 ] && echo "PASS" || { echo "FAILED"; docker logs "$NAME" 2>&1 | tail -20; }
 exit "$FAILED"
