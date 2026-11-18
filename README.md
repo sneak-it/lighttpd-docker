@@ -124,7 +124,8 @@ and `SIGNING_FPR` stops matching and the build fails. Pinning the fingerprint al
 keyserver trust irrelevant, so fetching at build time would add a flaky dependency and buy
 nothing.
 
-The build also fails if the pinned key has **expired**, because `gpg --verify` exits 0 on a good
+The build accepts only a good signature whose primary key fingerprint equals `SIGNING_FPR`. An
+**expired** or **revoked** key fails the build, because `gpg --verify` alone exits 0 on a good
 signature from an expired key. Without that check, verification would quietly degrade the day
 upstream rotates. Rotate the key file and `SIGNING_FPR` together.
 

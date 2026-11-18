@@ -15,9 +15,11 @@ RUN url="$SRC/releases-${LIGHTTPD_VERSION%.*}.x/lighttpd-$LIGHTTPD_VERSION.tar.x
  && curl -fsSLO "$url.asc" \
  && export GNUPGHOME=$(mktemp -d) \
  && gpg --batch --import /tmp/lighttpd-signing-key.asc \
- && gpg --batch --list-keys --with-colons "$SIGNING_FPR" > /tmp/key.txt \
- && awk -F: '/^pub/ && $2=="e" { print "pinned signing key has expired"; exit 1 }' /tmp/key.txt \
- && gpg --batch --verify "lighttpd-$LIGHTTPD_VERSION.tar.xz.asc" "lighttpd-$LIGHTTPD_VERSION.tar.xz" \
+ && { gpg --batch --status-fd 1 --verify "lighttpd-$LIGHTTPD_VERSION.tar.xz.asc" \
+        "lighttpd-$LIGHTTPD_VERSION.tar.xz" > /tmp/sig.txt || true; } \
+ && { grep -q '^\[GNUPG:\] GOODSIG ' /tmp/sig.txt \
+   && grep -q "^\[GNUPG:\] VALIDSIG .* $SIGNING_FPR\$" /tmp/sig.txt \
+   || { echo "no good signature from $SIGNING_FPR:"; cat /tmp/sig.txt; exit 1; }; } \
  && tar xf "lighttpd-$LIGHTTPD_VERSION.tar.xz"
 # Option types are inconsistent upstream: pcre2/lua/openssl are boolean, the rest are features.
 # No db, ldap, kerberos, webdav or bzip2 backends: large dependency chains or no HTTP client wants them.
