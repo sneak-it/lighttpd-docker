@@ -100,3 +100,9 @@ jobs:
           cache-from: |
             type=gha,scope=amd64
             type=gha,scope=arm64
+          sbom: true
+          provenance: mode=max
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}

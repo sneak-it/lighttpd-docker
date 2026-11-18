@@ -115,7 +115,8 @@ need it.
 ## Build
 
 Source tarballs are GPG-verified against a key committed to this repo and pinned by fingerprint
-in the Dockerfile. Releases ship no checksum file, so the signature is the only integrity check.
+in the Dockerfile. Upstream's `.sha256sum` files come from the same server as the tarball, so
+they add no trust and the build does not check them.
 
     Glenn Strauss (lighttpd) <gstrauss@gluelogic.com>
     649D 0DD7 67FF 2062 02A7  6C51 58F1 4A78 6FE1 98C8   (expires 2030-05-12)
